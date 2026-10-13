@@ -8,6 +8,14 @@ Avles is an illustrative SaaS dashboard for re-engagement automation: determinis
 
 ---
 
+## 🎬 Product Demo Walkthrough
+
+[![Watch Product Demo Walkthrough](Claude%20outputs/orbit-overview-1440.png)](https://github.com/Selva201998/Avles_Martech/blob/main/martech%20demo.mp4)
+
+> 📹 **[Click here to watch the full product demo video (martech demo.mp4)](https://github.com/Selva201998/Avles_Martech/blob/main/martech%20demo.mp4)**
+
+---
+
 ## Quick start
 
 ```bash
