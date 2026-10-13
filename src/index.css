@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+/*
+ * Avles design tokens.
+ * Tailwind v4 exposes every --color-* / --font-* / --shadow-* / --radius-* token
+ * as a utility (e.g. bg-brand-600, text-ink-muted, shadow-card, rounded-card).
+ */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Primary: rich indigo / violet */
+  --color-brand-50: #f4f2ff;
+  --color-brand-100: #ebe7ff;
+  --color-brand-200: #d7cffe;
+  --color-brand-300: #b8a9fb;
+  --color-brand-400: #937ef6;
+  --color-brand-500: #6e56f0;
+  --color-brand-600: #5b40e0;
+  --color-brand-700: #4b32c0;
+  --color-brand-800: #3d2a9b;
+  --color-brand-900: #31257a;
+  --color-brand-950: #1d1650;
+
+  /* Secondary accents (used sparingly) */
+  --color-accent-blue: #3b82f6;
+  --color-accent-teal: #0d9488;
+  --color-accent-orange: #e8833a;
+
+  /* Neutrals & surfaces */
+  --color-canvas: #f7f7fb;
+  --color-surface: #ffffff;
+  --color-surface-muted: #f9f9fc;
+  --color-line: #e7e7ef;
+  --color-line-strong: #d6d6e2;
+  --color-ink: #11132a;
+  --color-ink-secondary: #4a4e69;
+  --color-ink-muted: #6b7090;
+  --color-ink-faint: #9a9eb6;
+
+  /* Chart series (validated for CVD separation; see README › Design system) */
+  --color-series-1: #6e56f0;
+  --color-series-2: #0d9488;
+  --color-series-3: #e8833a;
+
+  --radius-card: 14px;
+  --shadow-card: 0 1px 2px rgb(17 19 42 / 0.04), 0 1px 3px rgb(17 19 42 / 0.03);
+  --shadow-card-hover: 0 6px 16px -4px rgb(17 19 42 / 0.08), 0 2px 4px -2px rgb(17 19 42 / 0.04);
+  --shadow-popover: 0 12px 32px -8px rgb(17 19 42 / 0.18), 0 2px 6px rgb(17 19 42 / 0.06);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    min-height: 100vh;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-brand-500);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  select {
+    cursor: pointer;
+  }
+}
+
+/* Thin, unobtrusive scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+/* Recharts: remove default focus outline on SVG surface; keep keyboard focus on controls */
+.recharts-wrapper svg:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+@keyframes avles-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: avles-fade-in 160ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
+}
+
+/* Applied briefly when global search jumps to a dashboard item */
+.search-flash {
+  box-shadow: 0 0 0 3px var(--color-brand-300), var(--shadow-card-hover);
+  transition: box-shadow 200ms ease-out;
+}

@@ -1,0 +1,372 @@
+{
+  "name": "Avles — User Re-engagement Workflow (demo)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "avles-user-activity",
+        "options": {}
+      },
+      "name": "1. User Activity Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -7600,
+        1120
+      ],
+      "webhookId": "avles-reengagement-webhook",
+      "id": "309e6ca7-a568-4c52-bb1f-4d42af42e982"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Step 2: schema validation (idempotency by event_id is enforced upstream / in the app simulator)\nconst body = $json.body || $json;\n\nif (!body.user_id || !body.country || typeof body.last_active_days !== 'number') {\n  throw new Error('Schema validation failed: user_id, country and numeric last_active_days are required');\n}\n\nreturn { json: { ...body, validated: true } };"
+      },
+      "name": "2. Validate Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -7376,
+        1120
+      ],
+      "id": "c30d93ef-99c0-4f48-9112-db9c0eb21bba"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.last_active_days }}",
+              "operation": "largerEqual",
+              "value2": 7
+            }
+          ]
+        }
+      },
+      "name": "3. Inactivity Rule (last_active >= 7d)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -7152,
+        1120
+      ],
+      "id": "f119ba4e-9215-4ec5-a4d3-2a9ae18970b5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3001/api/crm/lookup",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_id\": \"{{ ($('1. User Activity Webhook').item.json.body ?? $('1. User Activity Webhook').item.json).user_id }}\"\n}",
+        "options": {}
+      },
+      "name": "4. Load Customer Profile (CRM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -6912,
+        1024
+      ],
+      "id": "1f337d32-7507-480e-b256-ffa0f5bb21bf"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Step 5: merge CRM profile with the triggering event, then route to a segment.\n// The webhook node wraps the payload in { headers, params, query, body } — read .body explicitly.\nconst event = ($('1. User Activity Webhook').item.json.body ?? $('1. User Activity Webhook').item.json);\nconst crm = $json.error ? {} : $json; // CRM unavailable → continue with event-only payload\n\n// Event fields win: they describe THIS user's current state. CRM only fills gaps.\nconst user = {\n  user_id: event.user_id,\n  name: event.name ?? crm.name,\n  email: event.email ?? crm.email,\n  country: event.country ?? crm.country,\n  subscription: event.subscription ?? crm.subscription ?? 'free',\n  last_active_days: Number(event.last_active_days ?? crm.last_active_days),\n  core_actions_last_30_days: Number(event.core_actions_last_30_days ?? crm.core_actions_last_30_days ?? 0),\n  goal: event.goal ?? crm.goal,\n  preferred_channel: crm.preferred_channel ?? 'Email',\n};\n\nlet segment = 'At-Risk';\nif (user.subscription === 'paid') segment = 'Paid Subscriber';\nelse if (user.subscription === 'trial') segment = 'Free User / Trial Expired';\nelse if (user.core_actions_last_30_days >= 15) segment = 'Highly Engaged / Inactive';\nelse if (user.core_actions_last_30_days < 5) segment = 'Low Engagement';\n\nreturn { json: { ...user, first_name: (user.name || 'there').split(' ')[0], segment_name: segment } };"
+      },
+      "name": "5. Segment User",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6656,
+        1024
+      ],
+      "id": "e78916b3-78d1-4a71-b1e4-6b8ad5ad6d66"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [{ \"parts\": [{ \"text\": \"You are a lifecycle marketing assistant for a subscription app. Using only the behavioural signals below, return ONLY a valid JSON object:\\n{\\n  \\\"subject\\\": \\\"string (5-8 words)\\\",\\n  \\\"body\\\": \\\"string (2-3 friendly sentences addressing the user by first name)\\\",\\n  \\\"cta\\\": \\\"string (2-4 words)\\\",\\n  \\\"recommendation\\\": \\\"string (4-6 words)\\\",\\n  \\\"rationale\\\": \\\"string (1-2 sentences)\\\",\\n  \\\"suggestedChannel\\\": \\\"Email\\\"|\\\"Push Notification\\\"|\\\"In-App Message\\\",\\n  \\\"confidence\\\": number (0-1)\\n}\\n\\nFirst name: {{ $json.first_name }}\\nPlan: {{ $json.subscription }}\\nSegment: {{ $json.segment_name }}\\nCore actions (30d): {{ $json.core_actions_last_30_days }}\\nGoal: {{ $json.goal }}\\nInactive days: {{ $json.last_active_days }}\" }] }],\n  \"generationConfig\": { \"responseMimeType\": \"application/json\", \"temperature\": 0.9 }\n}",
+        "options": {},
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi"
+      },
+      "name": "6. AI Recommendation (LLM API)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -6400,
+        1024
+      ],
+      "id": "fae2f5de-e845-4728-9c01-dc10b9b1ce5b",
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "// Step 6b: parse model output. If the model failed (503 overload, 429, timeout, bad JSON),\n// fall back to a SEGMENT-SPECIFIC template so each scenario still gets distinct copy.\nconst user = $('5. Segment User').item.json;\nconst name = user.first_name || 'there';\nconst n = user.core_actions_last_30_days;\n\nlet parsed = null;\nlet failure = null;\ntry {\n  if ($json.error) failure = $json.error.description || $json.error.message || 'LLM request failed';\n  const text = $json.candidates?.[0]?.content?.parts?.[0]?.text;\n  if (text) parsed = JSON.parse(text);\n  else if (!failure) failure = 'Empty model response';\n} catch (e) {\n  failure = 'Model returned invalid JSON';\n}\n\nconst TEMPLATES = {\n  'Highly Engaged / Inactive': {\n    subject: `Pick up where you left off, ${name}`,\n    body: `Hi ${name}, you completed ${n} actions last month — that's a real habit. Two minutes today keeps your streak alive.`,\n    cta: 'Resume my plan', recommendation: 'Progress continuity reminder', suggestedChannel: 'Email', confidence: 0.82,\n  },\n  'Paid Subscriber': {\n    subject: `${name}, your progress report is ready`,\n    body: `Hi ${name}, your premium insights from last month are waiting — including features you haven't opened yet.`,\n    cta: 'View my insights', recommendation: 'Advanced feature insights', suggestedChannel: 'Email', confidence: 0.8,\n  },\n  'Free User / Trial Expired': {\n    subject: `Your trial in numbers, ${name}`,\n    body: `Hi ${name}, you logged ${n} actions during your trial. Keep your progress and premium features with one tap.`,\n    cta: 'Keep my progress', recommendation: 'Trial recap & upgrade preview', suggestedChannel: 'Push Notification', confidence: 0.8,\n  },\n  'Low Engagement': {\n    subject: `One small step, ${name}`,\n    body: `Hi ${name}, getting started is the hardest part. Pick a ready-made template and you're done in under five minutes.`,\n    cta: 'Browse templates', recommendation: 'Quick-start tips & templates', suggestedChannel: 'Push Notification', confidence: 0.78,\n  },\n  'At-Risk': {\n    subject: `Ready to restart your routine, ${name}?`,\n    body: `Hi ${name}, your plan is saved exactly where you left it. Restart with a lighter first week.`,\n    cta: 'Restart my routine', recommendation: 'Routine reset reminder', suggestedChannel: 'In-App Message',\n    confidence: 0.62, // ambiguous segment → below the gate → human review\n  },\n};\n\nconst ai_source = parsed ? 'llm' : 'fallback-template';\nif (!parsed) {\n  parsed = { ...(TEMPLATES[user.segment_name] ?? TEMPLATES['At-Risk']), rationale: `Fallback template for segment \"${user.segment_name}\" (${failure}).` };\n}\n\nreturn { json: { ...user, ai_data: parsed, ai_source, ai_error: failure } };"
+      },
+      "name": "6b. Parse AI Response & Fallback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -6280,
+        1024
+      ],
+      "id": "77a8b6f3-8b9a-4c22-9e8d-8a0b12345678"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.ai_data.confidence }}",
+              "operation": "largerEqual",
+              "value2": 0.75
+            }
+          ]
+        }
+      },
+      "name": "7. Confidence Gate (>= 0.75)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -6040,
+        1024
+      ],
+      "id": "5f9d69da-3678-4db4-a18a-3aef15b75e45"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3001/api/campaigns/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_id\": \"{{ $json.user_id }}\",\n  \"recipient\": \"{{ $json.email || 'demo-recipient@example.com' }}\",\n  \"channel\": \"{{ $json.ai_data.suggestedChannel }}\",\n  \"campaign_name\": \"Re-engagement - {{ $json.ai_data.recommendation }}\",\n  \"ai_source\": \"{{ $json.ai_source }}\"\n}",
+        "options": {}
+      },
+      "name": "8. Marketing Action Dispatcher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -5800,
+        912
+      ],
+      "id": "c9e0830a-0f7d-424d-b1ac-e7bfdb04d623"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Low-confidence output is held for a person instead of being sent.\nreturn {\n  json: {\n    status: 'FLAGGED_HUMAN_REVIEW',\n    user_id: $json.user_id,\n    segment: $json.segment_name,\n    recommendation: $json.ai_data?.recommendation,\n    confidence: $json.ai_data?.confidence,\n    reason: 'Confidence below the review threshold',\n  },\n};"
+      },
+      "name": "Human Review Queue",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -5800,
+        1120
+      ],
+      "id": "6eca4f5b-dda0-48a7-a485-eeefc14e8599"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:3001/api/warehouse/audit-log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_id\": \"{{ $('5. Segment User').item.json.user_id }}\",\n  \"segment\": \"{{ $('5. Segment User').item.json.segment_name }}\",\n  \"dispatch_id\": \"{{ $json.dispatch_id || '' }}\",\n  \"status\": \"{{ $json.status || 'SUCCESS' }}\",\n  \"timestamp\": \"{{ $now }}\"\n}",
+        "options": {}
+      },
+      "name": "9. Warehouse Audit Log",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [
+        -5560,
+        1024
+      ],
+      "id": "b3a0692d-05a5-4cd1-a3fc-869c9c2e1350"
+    },
+    {
+      "parameters": {
+        "sendTo": "your-test-inbox@example.com",
+        "subject": "={{ $json.ai_data.subject }}",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background:#ffffff; border:1px solid #e7e7ef; border-radius:12px; overflow:hidden;\"><div style=\"background:#5b40e0; padding:22px 24px; color:#ffffff;\"><div style=\"font-size:20px; font-weight:700;\">Avles</div><div style=\"font-size:12px; opacity:.85; margin-top:2px;\">Demo preview — sample data</div></div><div style=\"padding:28px 24px; color:#11132a; line-height:1.6;\"><p style=\"font-size:15px; margin-top:0;\">{{ $json.ai_data.body }}</p><div style=\"text-align:center; margin:28px 0;\"><a href=\"https://example.com\" style=\"background:#5b40e0; color:#ffffff; text-decoration:none; padding:12px 24px; font-weight:600; border-radius:8px; font-size:14px; display:inline-block;\">{{ $json.ai_data.cta || 'Open the app' }}</a></div></div><div style=\"background:#f7f7fb; padding:14px 24px; border-top:1px solid #e7e7ef; font-size:12px; color:#6b7090;\"><b>User:</b> {{ $json.name }} ({{ $json.user_id }}) · <b>Segment:</b> {{ $json.segment_name }}<br><b>Source:</b> {{ $json.ai_source === 'llm' ? 'Gemini' : 'Fallback template — ' + $json.ai_error }} · <b>Confidence:</b> {{ $json.ai_data.confidence }} · <b>Channel:</b> {{ $json.ai_data.suggestedChannel }}<br><i>{{ $json.ai_data.rationale }}</i></div></div>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -5800,
+        1408
+      ],
+      "id": "e1eb7946-5aa9-4cb8-9dab-e7d58484417e",
+      "name": "Send Preview Email (optional)",
+      "webhookId": "9fce8a37-205c-4ad6-8427-d77cea1b1c59",
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "1. User Activity Webhook": {
+      "main": [
+        [
+          {
+            "node": "2. Validate Schema",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Validate Schema": {
+      "main": [
+        [
+          {
+            "node": "3. Inactivity Rule (last_active >= 7d)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Inactivity Rule (last_active >= 7d)": {
+      "main": [
+        [
+          {
+            "node": "4. Load Customer Profile (CRM)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Load Customer Profile (CRM)": {
+      "main": [
+        [
+          {
+            "node": "5. Segment User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Segment User": {
+      "main": [
+        [
+          {
+            "node": "6. AI Recommendation (LLM API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. AI Recommendation (LLM API)": {
+      "main": [
+        [
+          {
+            "node": "6b. Parse AI Response & Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6b. Parse AI Response & Fallback": {
+      "main": [
+        [
+          {
+            "node": "7. Confidence Gate (>= 0.75)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Confidence Gate (>= 0.75)": {
+      "main": [
+        [
+          {
+            "node": "8. Marketing Action Dispatcher",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Preview Email (optional)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Human Review Queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8. Marketing Action Dispatcher": {
+      "main": [
+        [
+          {
+            "node": "9. Warehouse Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Human Review Queue": {
+      "main": [
+        [
+          {
+            "node": "9. Warehouse Audit Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}
